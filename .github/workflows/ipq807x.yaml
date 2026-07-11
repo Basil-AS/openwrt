@@ -38,6 +38,11 @@ jobs:
                 make toolchain/install -j$(nproc) V=s || \
                 make toolchain/install V=s
 
+            - name: Build kernel (generates linux-6.12.87/.config, required by any kmod)
+              run: |
+                make target/linux/compile -j"$(nproc)" V=s || \
+                make target/linux/compile -j1 V=s
+
             - name: Build ONLY kmod-amneziawg / amneziawg-tools / luci-proto-amneziawg
               # Targeted package compile, not a full image/multi-device rebuild -
               # the base xiaomi_ax3600 image is already published by AgustinLorenzo
