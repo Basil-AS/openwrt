@@ -5,11 +5,19 @@ on: workflow_dispatch
 jobs:
     build:
         name: Prepare and build IPQ807x NSS generic images
-        runs-on: self-hosted
+        runs-on: ubuntu-26.04
+        timeout-minutes: 350
 
         steps:
             - name: Checkout
               uses: actions/checkout@v6.0.2
+
+            - name: Install build dependencies
+              run: |
+                sudo apt-get update
+                sudo apt-get install -y \
+                  bzip2 g++ gawk gcc git glibc-source libncurses-dev make rsync \
+                  zstd unzip python3 python3-distutils
 
             - name: Extract LLVM prebuilt
               run: |
@@ -61,65 +69,31 @@ jobs:
             - name: Build target images
               run: |
                 make -j$(nproc) V=s || \
-                make V=s
+                make -j1 V=s
 
-    release:
-        name: Make a release
-        runs-on: self-hosted
-        needs: build
-
-        steps:
-            - name: Get the current date
+            - name: Collect xiaomi_ax3600 + amneziawg artifacts
+              if: always()
               run: |
-                echo "NOW=$(date +%F-%H%M)" >> $GITHUB_ENV
-                echo "NOWWEB=$(date +%Y%m%d)" >> $GITHUB_ENV
+                mkdir -p out/images out/packages
+                cp -v bin/targets/qualcommax/ipq807x/*xiaomi_ax3600* out/images/ 2>/dev/null || true
+                cp -v bin/targets/qualcommax/ipq807x/*.manifest out/images/ 2>/dev/null || true
+                find bin/packages/aarch64_cortex-a53 -iname '*amneziawg*.apk' -exec cp -v {} out/packages/ \;
+                find bin/targets/qualcommax/ipq807x/packages -iname '*amneziawg*.apk' -exec cp -v {} out/packages/ \; 2>/dev/null || true
+                ( cd out && find . -type f -exec sha256sum {} \; > SHA256SUMS.txt )
+                cat out/SHA256SUMS.txt
 
-            - name: Create a release
-              uses: ncipollo/release-action@v1.21.0
+            - name: Upload xiaomi_ax3600 image + amneziawg packages
+              if: always()
+              uses: actions/upload-artifact@v4
               with:
-                name: "Updated prebuilt images (NSS-WiFi unified) ${{ env.NOW }}"
-                commit: "main_nss"
-                tag: "ipq807x-nsswifi-unified-${{ env.NOW }}"
-                generateReleaseNotes: true
-                makeLatest: true
-                artifacts: bin/targets/qualcommax/ipq807x/*
-                token: "${{ secrets.GITHUB_TOKEN }}"
+                name: xiaomi_ax3600-amneziawg
+                if-no-files-found: warn
+                path: out/**
 
-            - name: Clone OpenWRT Data Repo and push new data
-              run: |
-                git clone https://x-access-token:${{ secrets.DESTINATION_TOKEN }}@github.com/AgustinLorenzo/openwrtdata.git dest-repo
-                mkdir -p dest-repo/data/nss-wifi-unified/${{ env.NOWWEB }}
-                rsync -avzP --delete bin/targets/qualcommax/ipq807x/* dest-repo/data/nss-wifi-unified/${{ env.NOWWEB }}/
-                cd dest-repo
-                git add .
-                if git diff --cached --quiet; then
-                    echo "No changes to upload"
-                else
-                    git commit -m "Sync from ${{ github.repository }}:$(date +'%Y-%m-%d %H:%M:%S')"
-                fi
-
-            - name: Push public key of APK to OpenWRT Data repo
-              run: |
-                cp build_dir/target-aarch64_cortex-a53_musl/root-qualcommax/etc/apk/keys/public-key.pem dest-repo/data/nss-wifi-unified/${{ env.NOWWEB }}/
-                cd dest-repo
-                git add .
-                if git diff --cached --quiet; then
-                    echo "No changes to upload"
-                else
-                    git commit -m "Uploading the public key of APK, related to https://github.com/AgustinLorenzo/openwrt/issues/98"
-                fi
-
-            - name: Uploading the rest of the packages and refreshing the index
-              run: |
-                rsync -avzP bin/packages/aarch64_cortex-a53/*/*.apk bin/targets/qualcommax/ipq807x/packages/
-                make package/index
-                rsync -avzP bin/packages/aarch64_cortex-a53/*/*.apk dest-repo/data/nss-wifi-unified/${{ env.NOWWEB }}/packages/
-                rsync -avzP bin/targets/qualcommax/ipq807x/packages/packages.adb bin/targets/qualcommax/ipq807x/packages/index.json dest-repo/data/nss-wifi-unified/${{ env.NOWWEB }}/packages/
-                cd dest-repo
-                git add .
-                if git diff --cached --quiet; then
-                    echo "No changes to upload"
-                else
-                    git commit -m "Uploading the rest of the packages and refreshing the index"
-                    git push origin main
-                fi
+            - name: Upload build config used (for reproducibility)
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                name: build-config
+                if-no-files-found: warn
+                path: .config

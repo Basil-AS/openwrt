@@ -8442,3 +8442,10 @@ CONFIG_KERNEL_SKB_RECYCLER_MULTI_CPU=y
 # CONFIG_KERNEL_SKB_FIXED_SIZE_2K is not set
 # CONFIG_KERNEL_ALLOC_SKB_PAGE_FRAG_DISABLE is not set
 # end of Qualcomm IPQ Options
+
+# AmneziaWG (obfuscated WireGuard), added on top of the already-working
+# in-tree wireguard.ko / crypto-lib chain in this config.
+CONFIG_PACKAGE_kmod-amneziawg=y
+CONFIG_PACKAGE_amneziawg-tools=y
+CONFIG_PACKAGE_luci-proto-amneziawg=y
+CONFIG_PACKAGE_luci-i18n-amneziawg-ru=y
