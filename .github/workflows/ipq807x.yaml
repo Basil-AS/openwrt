@@ -6,7 +6,7 @@ jobs:
     build:
         name: Prepare and build IPQ807x NSS generic images
         runs-on: ubuntu-26.04
-        timeout-minutes: 350
+        timeout-minutes: 150
 
         steps:
             - name: Checkout
@@ -19,11 +19,6 @@ jobs:
                   bzip2 g++ gawk gcc git glibc-source libncurses-dev make rsync \
                   zstd unzip python3
 
-            - name: Extract LLVM prebuilt
-              run: |
-                wget https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq807x/llvm-bpf-22.1.3.Linux-x86_64.tar.zst
-                tar --zstd -xvf llvm-bpf-22.1.3.Linux-x86_64.tar.zst
-
             - name: Update and install feeds
               run: |
                 ./scripts/feeds update -a
@@ -32,29 +27,6 @@ jobs:
             - name: Import full config for IPQ807x NSS Generic
               run: |
                 mv .full_config .config
-
-            - name: QoL fixes on default config
-              run: |
-                mkdir -p files/etc/uci-defaults
-                cat > files/etc/uci-defaults/zzz_99-qol_fixes << EOF
-                uci set wireless.radio0.country='US'
-                uci set wireless.radio1.country='US'
-                uci set wireless.radio2.country='US'
-                uci set wireless.radio1.disabled=0
-                uci set wireless.radio2.disabled=0
-                uci set pbuf.opt.memory_profile=auto
-                uci set firewall.@defaults[0].flow_offloading=0
-                uci set ecm.@general[0].enable_bridge_filtering=0
-                uci set system.@system[0].cronloglevel='7'
-                uci commit wireless
-                uci commit pbuf
-                uci commit firewall
-                uci commit ecm
-                uci commit system
-                EOF
-
-            - name: Download package sources
-              run: make download V=s
 
             - name: Build tools
               run: |
@@ -66,28 +38,36 @@ jobs:
                 make toolchain/install -j$(nproc) V=s || \
                 make toolchain/install V=s
 
-            - name: Build target images
+            - name: Build ONLY kmod-amneziawg / amneziawg-tools / luci-proto-amneziawg
+              # Targeted package compile, not a full image/multi-device rebuild -
+              # the base xiaomi_ax3600 image is already published by AgustinLorenzo
+              # (verified sha256 in PROGRESS.md). We only need these 3 packages
+              # built against the same kernel tree, not a redundant full image.
               run: |
-                make -j$(nproc) V=s || \
-                make -j1 V=s
+                make package/feeds/awg/kmod-amneziawg/compile \
+                     package/feeds/awg/amneziawg-tools/compile \
+                     package/feeds/awg/luci-proto-amneziawg/compile \
+                     -j"$(nproc)" V=s || \
+                make package/feeds/awg/kmod-amneziawg/compile \
+                     package/feeds/awg/amneziawg-tools/compile \
+                     package/feeds/awg/luci-proto-amneziawg/compile \
+                     -j1 V=s
 
-            - name: Collect xiaomi_ax3600 + amneziawg artifacts
+            - name: Collect amneziawg artifacts
               if: always()
               run: |
-                mkdir -p out/images out/packages
-                cp -v bin/targets/qualcommax/ipq807x/*xiaomi_ax3600* out/images/ 2>/dev/null || true
-                cp -v bin/targets/qualcommax/ipq807x/*.manifest out/images/ 2>/dev/null || true
-                find bin/packages/aarch64_cortex-a53 -iname '*amneziawg*.apk' -exec cp -v {} out/packages/ \;
-                find bin/targets/qualcommax/ipq807x/packages -iname '*amneziawg*.apk' -exec cp -v {} out/packages/ \; 2>/dev/null || true
+                mkdir -p out
+                find bin/packages/aarch64_cortex-a53 -iname '*amneziawg*.apk' -exec cp -v {} out/ \; 2>/dev/null || true
+                find bin/targets/qualcommax/ipq807x/packages -iname '*amneziawg*.apk' -exec cp -v {} out/ \; 2>/dev/null || true
                 ( cd out && find . -type f -exec sha256sum {} \; > SHA256SUMS.txt )
                 cat out/SHA256SUMS.txt
 
-            - name: Upload xiaomi_ax3600 image + amneziawg packages
+            - name: Upload amneziawg packages
               if: always()
               uses: actions/upload-artifact@v4
               with:
-                name: xiaomi_ax3600-amneziawg
-                if-no-files-found: warn
+                name: amneziawg-packages
+                if-no-files-found: error
                 path: out/**
 
             - name: Upload build config used (for reproducibility)
